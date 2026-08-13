@@ -70,6 +70,16 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # zizmor: ignore[superfluous-actions]
+      # It suggests `gh release create` in a script step, since the runner
+      # already ships gh. Fair for a release that is only a tag and notes.
+      # This is a template though, and the step carries a commented
+      # `files: dist/*` for projects that attach build artifacts -- hand
+      # rolling asset upload is where the script stops being simpler.
+      #
+      # Inline rather than in .github/zizmor.yml: super-linter's copy of
+      # zizmor does not pick that file up, and an exception the two runners
+      # disagree about is worse than no exception.
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ needs.tag.outputs.tag }}
