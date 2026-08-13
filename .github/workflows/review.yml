@@ -26,8 +26,20 @@ on:
 
 permissions: {}
 
+# The event name is part of the group, and leaving it out broke this workflow
+# completely. Both triggers resolve to the same pull request number, so a
+# comment-driven run shared a group with the diff-driven one and cancelled it.
+# Every bot comment fires issue_comment -- super-linter posts its summary,
+# pr-agent posts its description -- so the review was reliably killed a few
+# seconds into `Set up job`, before the reviewers ran at all. The jobs then
+# reported `cancelled` rather than failed, which reads like a concurrency
+# nicety instead of a defect.
+#
+# With the event in the group, a new push still cancels the previous push's
+# review and a repeat @claude still cancels the previous comment's, which is
+# all the cancellation that was ever wanted.
 concurrency:
-  group: review-${{ github.event.pull_request.number || github.event.issue.number }}
+  group: review-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
