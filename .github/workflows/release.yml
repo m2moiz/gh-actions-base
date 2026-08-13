@@ -47,9 +47,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEFAULT_BUMP: patch
           WITH_V: "true"
-          # Dry run on anything that is not a real merge to main, so opening the
-          # workflow in a fork or a manual dispatch does not mint tags.
-          DRY_RUN: ${{ github.ref != 'refs/heads/main' }}
+          # Dry run on anything that is not a real merge to main. BOTH halves
+          # matter: a manual dispatch is normally aimed at main -- it is the
+          # only branch with the history the tag action needs -- so a ref check
+          # alone reads a dispatch as a merge and mints a real tag and release
+          # from a single click in the Actions tab. The event check is what
+          # makes the comment above true.
+          DRY_RUN: ${{ github.ref != 'refs/heads/main' || github.event_name != 'push' }}
 
   publish:
     name: gh-release
@@ -66,8 +70,19 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # zizmor suggests `gh release create` in a script step, since the runner
+      # already ships gh. Fair for a release that is only a tag and notes.
+      # This is a template though, and the step carries a commented
+      # `files: dist/*` for projects that attach build artifacts -- hand
+      # rolling asset upload is where the script stops being simpler.
+      #
+      # The directive sits below rather than here, and inline rather than in
+      # .github/zizmor.yml. Both placements were tried and neither suppressed
+      # anything: super-linter's copy of zizmor does not load the config file,
+      # and an ignore comment only counts when it falls INSIDE the span the
+      # finding reports -- this block is above the span's first line.
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
-        with:
+        with: # zizmor: ignore[superfluous-actions] deliberate, see above
           tag_name: ${{ needs.tag.outputs.tag }}
           # Let GitHub write the notes from merged PRs rather than maintaining
           # a changelog by hand that drifts from the commits.
