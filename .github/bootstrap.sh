@@ -41,7 +41,8 @@ JSON
 existing=$(gh api "repos/$REPO/rulesets" --jq \
   ".[] | select(.name == \"$RULESET_NAME\") | .id" 2>/dev/null || true)
 
-payload=$(python3 - "$CHECKS" <<'PY'
+payload=$(
+  python3 - "$CHECKS" <<'PY'
 import json, sys
 checks = json.loads(sys.argv[1])
 print(json.dumps({
@@ -90,6 +91,18 @@ gh api -X PATCH "repos/$REPO" \
   -F delete_branch_on_merge=true \
   -F allow_merge_commit=false \
   -F allow_rebase_merge=false >/dev/null
+
+# Repository settings the workflows depend on but cannot switch on themselves.
+# dependency-review fails outright with "Dependency review is not supported on
+# this repository" until the graph is enabled -- observed on the first live run
+# of this template, on a repo created minutes earlier.
+echo "==> enabling dependency graph, alerts and security updates"
+gh api -X PATCH "repos/$REPO" \
+  -f 'security_and_analysis[dependency_graph][status]=enabled' >/dev/null 2>&1 || true
+# Order matters: alerts are a precondition for automated fixes, and enabling
+# the second first returns 422.
+gh api -X PUT "repos/$REPO/vulnerability-alerts" >/dev/null
+gh api -X PUT "repos/$REPO/automated-security-fixes" >/dev/null
 
 cat <<EOF
 

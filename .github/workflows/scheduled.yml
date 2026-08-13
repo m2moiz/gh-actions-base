@@ -11,12 +11,11 @@ name: scheduled
 on:
   schedule:
     - cron: "23 5 * * *"
+  # No `inputs:` here on purpose. Checkov's CKV_GHA_7 requires
+  # workflow_dispatch inputs to be empty -- a dispatch input can influence what
+  # a build produces, which breaks the provenance chain. The LINKCHECK_URL
+  # repository variable covers the same need without that property.
   workflow_dispatch:
-    inputs:
-      site:
-        description: "URL to link-check (overrides the default below)"
-        required: false
-        type: string
 
 permissions: {}
 
@@ -41,10 +40,9 @@ jobs:
       - name: pick a target
         id: target
         env:
-          OVERRIDE: ${{ inputs.site }}
           DEFAULT: ${{ vars.LINKCHECK_URL }}
         run: |
-          url="${OVERRIDE:-$DEFAULT}"
+          url="$DEFAULT"
           echo "url=$url" >> "$GITHUB_OUTPUT"
           if [ -z "$url" ]; then
             echo "::notice::no LINKCHECK_URL variable and no input; skipping"
