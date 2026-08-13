@@ -47,9 +47,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEFAULT_BUMP: patch
           WITH_V: "true"
-          # Dry run on anything that is not a real merge to main, so opening the
-          # workflow in a fork or a manual dispatch does not mint tags.
-          DRY_RUN: ${{ github.ref != 'refs/heads/main' }}
+          # Dry run on anything that is not a real merge to main. BOTH halves
+          # matter: a manual dispatch is normally aimed at main -- it is the
+          # only branch with the history the tag action needs -- so a ref check
+          # alone reads a dispatch as a merge and mints a real tag and release
+          # from a single click in the Actions tab. The event check is what
+          # makes the comment above true.
+          DRY_RUN: ${{ github.ref != 'refs/heads/main' || github.event_name != 'push' }}
 
   publish:
     name: gh-release

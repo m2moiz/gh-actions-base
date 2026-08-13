@@ -39,13 +39,20 @@ jobs:
         uses: trufflesecurity/trufflehog@6f3c981e7b77f235fd2702dd74af25fc4b72bf11 # v3.96.0
         with:
           extra_args: --results=verified,unknown
-        # KNOWN FAILURE MODE, handled rather than ignored: on a push whose
-        # BASE and HEAD resolve to the same commit (a first push, a freshly
-        # created branch) the action exits non-zero with "BASE and HEAD are the
-        # same" -- a tooling error, not a finding. The scheduled full-history
-        # run above is the backstop, so a diff-scan that cannot compute a diff
-        # is allowed to pass rather than blocking every new branch.
-        continue-on-error: ${{ github.event_name == 'push' }}
+        # No continue-on-error, deliberately. It used to carry
+        # `continue-on-error: ${{ github.event_name == 'push' }}` to tolerate a
+        # "BASE and HEAD are the same" tooling error -- but the flag cannot
+        # tell a tooling error from a finding, so it swallowed verified secrets
+        # on every push to main, which is every squash-merge for the life of
+        # the repository. A secret scanner that reports green on a leak is
+        # worse than none, because the green is believed.
+        #
+        # The error it was guarding against is unreachable here anyway. The
+        # action only raises it when BASE and HEAD are passed explicitly and
+        # match; this workflow passes neither, so the action picks the range
+        # itself and already handles both edge cases -- a brand-new ref
+        # (`before` all zeroes) becomes a full-history scan, and a push with no
+        # commits exits 0.
 
   attack-surface:
     name: owasp noir
