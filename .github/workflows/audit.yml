@@ -1,0 +1,102 @@
+name: audit
+
+# WHOLE-CODEBASE REVIEW, NOT A DIFF REVIEW.
+#
+# review.yml only ever sees what a pull request changed. That misses the two
+# things diffs structurally cannot show: a defect that was already there before
+# anyone started reviewing, and a defect that only exists in the interaction
+# between two files neither of which changed. Nothing in a per-PR pipeline will
+# ever surface those, however many reviewers you point at it.
+#
+# So this one reads the repository as it stands. It is manual and monthly
+# rather than per-push because a full read costs real money and its findings do
+# not change between commits -- running it on every push would spend a lot to
+# re-report the same list.
+#
+# Output goes to a GitHub issue, because there is no pull request to comment
+# on. That is also the right place for it: findings from an audit are a backlog,
+# not a merge gate.
+
+on:
+  workflow_dispatch: # no inputs -- checkov CKV_GHA_7 rejects them
+  schedule:
+    - cron: "0 6 1 * *" # 06:00 UTC on the 1st
+
+permissions: {}
+
+concurrency:
+  group: audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: codebase audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: is a credential configured?
+        id: gate
+        env:
+          OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: echo "ready=${{ env.OAUTH != '' || env.KEY != '' }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: audit
+        if: steps.gate.outputs.ready == 'true'
+        uses: anthropics/claude-code-action@239e3a730883eeb5c53db12b0fc9573b3024b126 # v1.0.191
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # There is no pull request here, so track_progress has nowhere to
+          # post and the job log is hidden for security. The agent has to
+          # write the issue itself, which means it needs the tools to do it.
+          claude_args: |
+            --allowedTools "Read,Glob,Grep,Bash(gh issue create:*),Bash(gh issue list:*),Bash(gh label create:*),Bash(gh label list:*),Bash(git log:*),Bash(git blame:*)"
+            --max-turns 40
+          prompt: |
+            REPO: ${{ github.repository }}
+
+            Audit this entire repository for correctness defects. You are not
+            reviewing a diff -- read the code as it stands and look for what is
+            wrong with it today.
+
+            Prioritise, in this order:
+              1. A defect with a concrete failing input or sequence
+              2. A test that passes while the behaviour it names is broken
+              3. A guard that cannot fire in the state it exists to catch --
+                  a skipif on its own precondition, a check behind the flag it
+                  validates
+              4. A comment, docstring or doc that asserts a mechanism the code
+                  does not implement
+              5. An error message whose suggested remedy would not fix its own
+                  cause
+
+            For each finding give the file and line, the mechanism, and a
+            concrete input or sequence producing the wrong result. A finding
+            without a failure scenario is a guess -- say so, or drop it.
+            Ignore style, formatting and naming: linters already cover those
+            and a long list of nitpicks buries the two findings that matter.
+
+            First run `gh issue list --label audit --state open` and read what
+            is already filed. Do not re-file a finding that is already open.
+
+            Then, if you found anything new, file ONE issue:
+              gh issue create --label audit \
+                --title "Codebase audit: <n> findings" \
+                --body "<your findings, most severe first>"
+
+            The `audit` label must exist for this to work; create it with
+            `gh label create audit` if the command fails.
+
+            If you found nothing new, do not create an issue. Say so and stop.
+            An empty audit is a real result and an issue saying "no findings"
+            is noise.
