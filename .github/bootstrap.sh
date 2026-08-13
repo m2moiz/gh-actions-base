@@ -142,7 +142,7 @@ gh api -X PUT "repos/$REPO/automated-security-fixes" >/dev/null
 # is worse than a silent one.
 applied=$(gh api "repos/$REPO/rules/branches/$(gh api "repos/$REPO" --jq .default_branch)" \
   --jq '[.[] | select(.type == "required_status_checks")
-         | .parameters.required_status_checks[].context] | join(", ")')
+        | .parameters.required_status_checks[].context] | join(", ")')
 
 cat <<EOF
 
