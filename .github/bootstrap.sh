@@ -41,6 +41,36 @@ JSON
 existing=$(gh api "repos/$REPO/rulesets" --jq \
   ".[] | select(.name == \"$RULESET_NAME\") | .id" 2>/dev/null || true)
 
+# REFUSE TO SILENTLY REPLACE SOMEONE ELSE'S CHECK LIST. "Idempotent: re-running
+# updates the existing ruleset" is true and was the trap: this script carries
+# the TEMPLATE's check names, so running it from a template clone against a
+# real project overwrote that project's required checks with names its CI never
+# reports -- which does not fail loudly, it just blocks every future merge on
+# checks that will never arrive. Observed the first time it was pointed at a
+# second repository.
+if [ -n "$existing" ]; then
+  current=$(gh api "repos/$REPO/rulesets/$existing" --jq \
+    '[.rules[] | select(.type == "required_status_checks")
+      | .parameters.required_status_checks[].context] | sort | join(",")' 2>/dev/null || true)
+  wanted=$(python3 -c 'import json,sys; print(",".join(sorted(c["context"] for c in json.loads(sys.argv[1]))))' "$CHECKS")
+  if [ -n "$current" ] && [ "$current" != "$wanted" ]; then
+    cat >&2 <<EOF
+REFUSING to overwrite the existing "$RULESET_NAME" ruleset on $REPO.
+
+  it currently requires: $current
+  this script would set: $wanted
+
+Those differ, which usually means you are running a copy of this script that
+still carries another project's check names. Edit CHECKS at the top of this
+file to match this repository's job names, then re-run.
+
+If the change is what you actually want:  BOOTSTRAP_FORCE=1 $0 $REPO
+EOF
+    [ "${BOOTSTRAP_FORCE:-0}" = "1" ] || exit 1
+    echo "==> BOOTSTRAP_FORCE=1, overwriting anyway" >&2
+  fi
+fi
+
 payload=$(
   python3 - "$CHECKS" <<'PY'
 import json, sys
@@ -104,12 +134,22 @@ gh api -X PATCH "repos/$REPO" \
 gh api -X PUT "repos/$REPO/vulnerability-alerts" >/dev/null
 gh api -X PUT "repos/$REPO/automated-security-fixes" >/dev/null
 
+# Report what the SERVER says is in force, not what this script intended. The
+# closing message used to hardcode the template's own check names, so pointing
+# the script at another repository with a different CHECKS list printed a
+# confident and entirely wrong summary -- observed the first time it was run
+# against a real project. A bootstrap that misreports what it just configured
+# is worse than a silent one.
+applied=$(gh api "repos/$REPO/rules/branches/$(gh api "repos/$REPO" --jq .default_branch)" \
+  --jq '[.[] | select(.type == "required_status_checks")
+        | .parameters.required_status_checks[].context] | join(", ")')
+
 cat <<EOF
 
-Done. main on $REPO now requires:
+Done. The default branch on $REPO now requires:
   - a pull request
-  - green: super-linter, typos, test (py3.12), test (py3.13), trufflehog
-  - the branch to be up to date with main
+  - green: ${applied:-<none reported -- check the ruleset>}
+  - the branch to be up to date with it
   - no force-pushes, no deletion
 
 From here, merge with:  gh pr merge --auto --squash
