@@ -36,8 +36,8 @@ jobs:
     if: >-
       (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
       (github.event_name == 'issue_comment' &&
-       github.event.issue.pull_request &&
-       contains(github.event.comment.body, '@claude'))
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@claude'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -47,11 +47,17 @@ jobs:
       # credential for the GitHub side of the conversation.
       id-token: write
     steps:
-      - name: is a key configured?
+      # Either credential works. Prefer the OAuth token: `claude setup-token`
+      # mints it against an existing Claude subscription, so reviews cost
+      # nothing at the margin, and unlike the Codex side this is a documented
+      # input rather than a workaround. The API key stays supported for anyone
+      # without a subscription.
+      - name: is a credential configured?
         id: gate
         env:
+          OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: echo "ready=${{ env.KEY != '' }}" >> "$GITHUB_OUTPUT"
+        run: echo "ready=${{ env.OAUTH != '' || env.KEY != '' }}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.gate.outputs.ready == 'true'
@@ -63,6 +69,7 @@ jobs:
         if: steps.gate.outputs.ready == 'true'
         uses: anthropics/claude-code-action@239e3a730883eeb5c53db12b0fc9573b3024b126 # v1.0.191
         with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # Ask for the failure mode, not for a summary. A reviewer that
           # restates the diff has told you nothing; one that names a concrete
@@ -88,8 +95,8 @@ jobs:
     if: >-
       (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
       (github.event_name == 'issue_comment' &&
-       github.event.issue.pull_request &&
-       contains(github.event.comment.body, '@codex'))
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@codex'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
