@@ -1,0 +1,132 @@
+name: ci
+
+# Lint, spellcheck, test, coverage. The lane that gates every merge.
+#
+# Every job in this file is designed to be a REQUIRED status check. A workflow
+# that is not required is advisory, and an advisory check is a habit rather
+# than a gate -- see .github/bootstrap.sh, which makes them binding.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege at the top, elevated per job only where needed. Without this
+# block the token carries the repository default, which is usually write --
+# OpenSSF Scorecard's Token-Permissions check exists for exactly this.
+permissions: {}
+
+# Supersede in-flight runs on the same ref. Saves minutes and stops two runs
+# racing to report on the same PR.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: super-linter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Super-Linter reads the PR to work out the changed-files set.
+      pull-requests: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # fetch-depth: 0 is REQUIRED. With a shallow clone Super-Linter cannot
+          # diff against the base and silently falls back to linting everything
+          # -- or nothing, depending on version. Neither is what you asked for.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: super-linter
+        uses: super-linter/super-linter@4ce20838b8ab83717e78138c5b3a1407148e0918 # v8.7.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BRANCH: main
+          # On a PR, lint only what changed; on main, lint everything. A full
+          # sweep on every PR in a mature repo is a wall of pre-existing
+          # findings nobody reads.
+          VALIDATE_ALL_CODEBASE: ${{ github.event_name != 'pull_request' }}
+          # Opt OUT of the linters that duplicate your own toolchain rather than
+          # opting in to a list that silently stops covering new file types.
+          VALIDATE_PYTHON_PYLINT: false
+          VALIDATE_PYTHON_FLAKE8: false
+          VALIDATE_PYTHON_BLACK: false
+          VALIDATE_PYTHON_ISORT: false
+          VALIDATE_JSCPD: false
+
+  typos:
+    name: typos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Spelling in identifiers and prose. Cheap, and it catches the class of
+      # error that survives review because everyone reads what they meant.
+      - uses: crate-ci/typos@8a48f81b6c64dcfea44b3633223084c4be58ac5f # v1.49.0
+
+  test:
+    name: test (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # MATRIX THE RANGE YOUR PACKAGE DECLARES. A single-interpreter CI is how
+        # a project claims support for versions nobody has ever run. Keep this
+        # list and `requires-python` in the same commit, always.
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d # v10.0.0
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python }}
+
+      # A second cache for anything uv does not own (model weights, fixtures,
+      # build output). Keyed on the lockfile so a dependency change misses.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/pre-commit
+            .pytest_cache
+          key: aux-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: aux-${{ runner.os }}-py${{ matrix.python }}-
+
+      # Fails when pyproject.toml and uv.lock disagree. A hand-run `uv lock`
+      # that nobody committed is otherwise invisible until someone else installs.
+      - name: lockfile matches pyproject
+        run: uv lock --check
+
+      - name: tests with coverage
+        run: uv run pytest --cov --cov-report=xml --cov-report=term
+
+      # A SKIPPED TEST AND A PASSING TEST LOOK IDENTICAL IN AN EXIT CODE.
+      # This is not paranoia: a skipif on the very condition a gate exists to
+      # detect reports green in exactly the broken state. If a skip is
+      # legitimate, make it explicit here rather than letting it hide.
+      - name: no test may silently skip
+        run: |
+          uv run pytest -q 2>&1 | tail -3 | tee /tmp/summary
+          if grep -q 'skipped' /tmp/summary; then
+            echo "::error::a test SKIPPED -- a dependency is missing on the runner"
+            exit 1
+          fi
+
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: coverage.xml
+          # Tokenless upload works for public repos but is rate-limited and
+          # flaky under load; set CODECOV_TOKEN and this stops being a coin flip.
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true

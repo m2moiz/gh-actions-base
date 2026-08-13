@@ -1,0 +1,76 @@
+name: release
+
+# Tag on merge to main, then publish a release for the tag that was just cut.
+#
+# Ordering matters and is the thing most copies of this get wrong: the tag job
+# must RUN FIRST and hand its tag to the release job. A release workflow keyed
+# on `push: tags` instead will not fire here at all -- tags pushed by
+# GITHUB_TOKEN do not trigger further workflow runs, by design, to stop
+# recursion. Two jobs in one workflow sidesteps that entirely.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+# Never cancel a release mid-flight; a half-published release is worse than a
+# slow one. Note this differs deliberately from every other file here.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: bump tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.bump.outputs.new_tag }}
+      bumped: ${{ steps.bump.outputs.part }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The action reads commit history to decide major/minor/patch.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Reads Conventional Commit subjects: `feat:` bumps minor, `fix:` patch,
+      # a `!` or BREAKING CHANGE bumps major. That is the same convention a
+      # commit-message guard can enforce locally, so the two reinforce.
+      - name: bump
+        id: bump
+        uses: anothrNick/github-tag-action@4ed44965e0db8dab2b466a16da04aec3cc312fd8 # 1.75.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BUMP: patch
+          WITH_V: "true"
+          # Dry run on anything that is not a real merge to main, so opening the
+          # workflow in a fork or a manual dispatch does not mint tags.
+          DRY_RUN: ${{ github.ref != 'refs/heads/main' }}
+
+  publish:
+    name: gh-release
+    needs: [tag]
+    # No tag means no release. `if` rather than a failing step: a merge that
+    # bumps nothing is normal, not an error.
+    if: needs.tag.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          tag_name: ${{ needs.tag.outputs.tag }}
+          # Let GitHub write the notes from merged PRs rather than maintaining
+          # a changelog by hand that drifts from the commits.
+          generate_release_notes: true
+          # Uncomment once the project builds artifacts worth attaching.
+          # files: dist/*

@@ -1,0 +1,105 @@
+name: pr
+
+# Everything that acts ON a pull request: review, visual regression, automerge.
+#
+# THE FORK RULE, which governs this whole file. `pull_request` from a fork gets
+# a read-only token and NO secrets. Every job here therefore checks that the
+# secret it needs is actually present and skips cleanly when it is not --
+# otherwise the template makes every external contribution look broken.
+#
+# `pull_request_target` would hand these jobs write access and secrets on fork
+# PRs. It is deliberately NOT used: combined with a checkout of the PR head it
+# is the single most exploited misconfiguration in GitHub Actions, and both
+# zizmor and Scorecard's Dangerous-Workflow check flag it.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize, labeled]
+
+permissions: {}
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: pr-agent
+    # Draft PRs are work in progress; reviewing them is noise.
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      # Skips instead of failing when the key is absent -- a fork PR, or a
+      # freshly cloned template nobody has configured yet.
+      - name: is a model key configured?
+        id: gate
+        env:
+          KEY: ${{ secrets.OPENAI_KEY }}
+        run: echo "ready=${{ env.KEY != '' }}" >> "$GITHUB_OUTPUT"
+
+      - name: pr-agent
+        if: steps.gate.outputs.ready == 'true'
+        uses: The-PR-Agent/pr-agent@f6af7d77554ff8d26adffded077e6461329e92fa # v0.42.0
+        env:
+          OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  visual:
+    name: lost-pixel
+    # OPT-IN, because most repositories have no UI. Add a `visual-regression`
+    # label (or delete this condition) to turn it on. A template that fails
+    # every CLI project on a missing storybook build is a template nobody keeps.
+    if: contains(github.event.pull_request.labels.*.name, 'visual-regression')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+      # lost-pixel compares RENDERED output, so something has to render first.
+      # Point this at whatever produces your static build or storybook.
+      - run: npm run build-storybook
+
+      - uses: lost-pixel/lost-pixel@41055d71dea42eb5fa5c27dabd2a90722f376e33 # v3.22.0
+        env:
+          LOST_PIXEL_API_KEY: ${{ secrets.LOST_PIXEL_API_KEY }}
+
+  automerge:
+    name: automerge
+    needs: [review]
+    # Only ever on a labelled PR. Never a default -- an automerge that triggers
+    # on everything is a merge queue with no queue.
+    if: contains(github.event.pull_request.labels.*.name, 'automerge')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+    steps:
+      # NOTE ON THIS ACTION: pascalgn/automerge-action was last pushed
+      # 2024-09-22. It works, and it is what was asked for. GitHub's own
+      # `gh pr merge --auto` plus a ruleset with required checks does the same
+      # job with nothing to maintain, and .github/bootstrap.sh enables it --
+      # prefer that if you ever want to drop a dependency.
+      - uses: pascalgn/automerge-action@7961b8b5eec56cc088c140b56d864285eabd3f67 # v0.16.4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_LABELS: automerge
+          MERGE_METHOD: squash
+          # Wait for required checks rather than racing them.
+          MERGE_REQUIRED_APPROVALS: "0"
+          MERGE_RETRIES: "12"
+          MERGE_RETRY_SLEEP: "30000"
+          MERGE_DELETE_BRANCH: "true"

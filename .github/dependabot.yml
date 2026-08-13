@@ -1,0 +1,47 @@
+version: 2
+
+# NOT OPTIONAL, given the SHA pins in the workflows.
+#
+# Pinning every action to a commit hash is what takes zizmor's `unpinned-uses`
+# count to zero: a tag can be moved by whoever owns the action, a hash cannot.
+# The cost is that pins go stale silently -- a pinned action never picks up a
+# security fix, and nothing tells you. Dependabot is the other half of that
+# trade, and pinning without it is worse than not pinning at all.
+#
+# It understands the `# v1.2.3` comment beside each hash and keeps it in step,
+# so the pins stay readable as they move.
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      # Matches the Conventional Commits that release.yml reads to decide a
+      # version bump -- an action update is a chore, so it does not mint a
+      # release on its own.
+      prefix: chore
+      include: scope
+    groups:
+      # One PR for the routine bumps instead of five. Anything that is not a
+      # patch still arrives on its own, because a major version of an action
+      # can change its inputs and deserves to be read.
+      actions-patch:
+        patterns: ["*"]
+        update-types: [patch]
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    cooldown:
+      default-days: 7

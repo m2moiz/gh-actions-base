@@ -1,0 +1,8 @@
+# crate-ci/typos configuration. Keep it small: a long allow-list is a sign the
+# check is being worked around rather than used.
+[files]
+extend-exclude = ["*.lock", "uv.lock", "package-lock.json", ".git/"]
+
+[default.extend-words]
+# Real words this project uses that look like typos to the dictionary.
+# e.g. "crate" abbreviations, product names.

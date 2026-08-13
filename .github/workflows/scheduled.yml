@@ -1,0 +1,84 @@
+name: scheduled
+
+# The two checks that are about the world outside the repository, and so are
+# not caused by a push: links rot when other people's sites change, and the
+# metrics card is a picture of a moment.
+#
+# Both are `continue-on-error`-shaped concerns -- a dead third-party link is not
+# a reason to consider your main branch broken -- so neither of these jobs
+# belongs among the required status checks.
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+    inputs:
+      site:
+        description: "URL to link-check (overrides the default below)"
+        required: false
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: scheduled
+  cancel-in-progress: true
+
+jobs:
+  links:
+    name: linkcheck
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # SET THIS. With no site to crawl the job has nothing to do, so it skips
+      # rather than failing an empty template. Point it at your docs site, or
+      # pass a URL via workflow_dispatch.
+      - name: pick a target
+        id: target
+        env:
+          OVERRIDE: ${{ inputs.site }}
+          DEFAULT: ${{ vars.LINKCHECK_URL }}
+        run: |
+          url="${OVERRIDE:-$DEFAULT}"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          if [ -z "$url" ]; then
+            echo "::notice::no LINKCHECK_URL variable and no input; skipping"
+          fi
+
+      - name: linkcheck
+        if: steps.target.outputs.url != ''
+        uses: filiph/linkcheck@f2c15a0be0d9c83def5df3edcc0f2d6582845f2d # 3.0.0
+        with:
+          arguments: ${{ steps.target.outputs.url }}
+
+  metrics:
+    name: metrics embed
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # lowlighter/metrics renders an SVG and commits it. It needs a classic PAT
+      # in METRICS_TOKEN (scope: public_repo) -- GITHUB_TOKEN cannot read the
+      # profile-level data the card is made of. Absent that, skip: a template
+      # should not fail on a credential its user has not chosen to create.
+      - name: is a metrics token configured?
+        id: gate
+        env:
+          TOKEN: ${{ secrets.METRICS_TOKEN }}
+        run: echo "ready=${{ env.TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
+      - name: metrics
+        if: steps.gate.outputs.ready == 'true'
+        uses: lowlighter/metrics@65836723097537a54cd8eb90f61839426b4266b6 # v3.34
+        with:
+          token: ${{ secrets.METRICS_TOKEN }}
+          user: ${{ github.repository_owner }}
+          filename: metrics.svg
+          template: classic
+          base: header, activity, community, repositories
+          config_timezone: Europe/Paris

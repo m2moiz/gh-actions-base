@@ -1,0 +1,82 @@
+name: security
+
+# Secret scanning and attack-surface discovery.
+#
+# Separate from ci.yml on purpose: these are the checks you want running on a
+# schedule as well as on a diff. A secret committed on Tuesday is still a
+# secret on Friday, and no push event will remind you.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly sweep of the whole history, not just what changed.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: trufflehog
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # REQUIRED. TruffleHog scans history; a shallow clone gives it one
+          # commit and it reports clean on a repository full of leaked keys.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: trufflehog
+        uses: trufflesecurity/trufflehog@6f3c981e7b77f235fd2702dd74af25fc4b72bf11 # v3.96.0
+        with:
+          extra_args: --results=verified,unknown
+        # KNOWN FAILURE MODE, handled rather than ignored: on a push whose
+        # BASE and HEAD resolve to the same commit (a first push, a freshly
+        # created branch) the action exits non-zero with "BASE and HEAD are the
+        # same" -- a tooling error, not a finding. The scheduled full-history
+        # run above is the backstop, so a diff-scan that cannot compute a diff
+        # is allowed to pass rather than blocking every new branch.
+        continue-on-error: ${{ github.event_name == 'push' }}
+
+  attack-surface:
+    name: owasp noir
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Noir enumerates endpoints from source and can passively flag issues on
+      # them. It is a discovery tool: on a library or CLI with no HTTP surface
+      # it finds nothing, which is the correct answer and costs ~20 seconds.
+      - name: noir
+        id: noir
+        uses: owasp-noir/noir@e1c7c56e4b4ec2e599eec46d8bb2a1c0deed4b4a # v1.2.1
+        with:
+          base_path: .
+          format: json
+          passive_scan: true
+          passive_scan_severity: high
+
+      - name: report findings
+        if: steps.noir.outputs.passive_results != ''
+        env:
+          RESULTS: ${{ steps.noir.outputs.passive_results }}
+        run: |
+          {
+            echo "### OWASP Noir — passive findings"
+            echo '~~~json'
+            echo "$RESULTS"
+            echo '~~~'
+          } >> "$GITHUB_STEP_SUMMARY"
