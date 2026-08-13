@@ -1,1 +1,11 @@
-.DS_Store
+# Build and test artifacts. Nothing here is source: no scripts, ever.
+__pycache__/
+*.py[cod]
+.coverage
+coverage.xml
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+.venv/
