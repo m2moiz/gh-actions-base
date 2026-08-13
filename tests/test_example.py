@@ -1,4 +1,4 @@
-from example import add
+from example import add, percent
 
 
 def test_add() -> None:
@@ -7,3 +7,7 @@ def test_add() -> None:
 
 def test_add_is_commutative() -> None:
     assert add(2, 3) == add(3, 2)
+
+
+def test_percent():
+    assert percent(1, 1) == 100
