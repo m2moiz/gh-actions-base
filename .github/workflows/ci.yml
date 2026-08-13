@@ -29,8 +29,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Super-Linter reads the PR to work out the changed-files set.
-      pull-requests: read
+      # write, not read: Super-Linter posts its summary as a PR comment and
+      # fails the job with a 403 if it cannot. Observed on the first live run.
+      pull-requests: write
       statuses: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
