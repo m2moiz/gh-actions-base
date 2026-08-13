@@ -1,0 +1,17 @@
+# shfmt reads this file, which is how the shell in this repository stays on
+# spaces rather than shfmt's default tabs. Super-Linter runs shfmt with no
+# flags, so .editorconfig is the only place that decision can live.
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+charset = utf-8
+
+[*.sh]
+indent_style = space
+indent_size = 2
+
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2

@@ -41,7 +41,8 @@ JSON
 existing=$(gh api "repos/$REPO/rulesets" --jq \
   ".[] | select(.name == \"$RULESET_NAME\") | .id" 2>/dev/null || true)
 
-payload=$(python3 - "$CHECKS" <<'PY'
+payload=$(
+  python3 - "$CHECKS" <<'PY'
 import json, sys
 checks = json.loads(sys.argv[1])
 print(json.dumps({
