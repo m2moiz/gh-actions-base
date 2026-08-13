@@ -1,0 +1,56 @@
+name: codeql
+
+# The code-scanning layer the other security jobs do not provide.
+#
+# TruffleHog finds committed secrets. Noir maps endpoints. Neither one READS
+# your code for injection, path traversal, unsafe deserialization or the rest.
+# CodeQL is the only job in this repository that does, and it is free on public
+# repositories.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # A new query pack can find a bug in code that has not changed since 2023,
+    # which is the whole argument for running this on a clock and not just on
+    # a diff.
+    - cron: "41 4 * * 3"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Writing the results into the repository's Security tab is the whole
+      # point; without this the run succeeds and reports nowhere.
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # Add every language the repository actually contains. A missing
+        # language is not an error here, it is silent non-coverage.
+        language: [python, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        with:
+          language: ${{ matrix.language }}
+          # security-and-quality is broader than the default and worth the
+          # extra minute on a codebase this size.
+          queries: security-and-quality
+
+      - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        with:
+          category: /language:${{ matrix.language }}

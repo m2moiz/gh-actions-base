@@ -1,6 +1,6 @@
 # gh-actions-base
 
-A base GitHub Actions setup to start projects from. Six workflows, every action
+A base GitHub Actions setup to start projects from. Nine workflows, every action
 pinned to a commit hash, and the one piece most CI templates leave out: a script
 that makes the checks **binding** instead of advisory.
 
@@ -28,6 +28,9 @@ least once, so `bootstrap.sh` after the first run, not before.
 | `pr.yml` | pull request | pr-agent · lost-pixel · automerge |
 | `release.yml` | push to main | tag bump → gh-release |
 | `scheduled.yml` | daily | linkcheck · metrics embed |
+| `codeql.yml` | push, PR, weekly | SAST over python + actions |
+| `posture.yml` | push, PR, weekly | zizmor · actionlint · scorecard |
+| `review.yml` | PR, `@claude` / `@codex` | two-family adversarial review |
 
 ## The design decisions worth knowing
 
@@ -75,6 +78,8 @@ Everything below is optional; each job skips cleanly when its value is absent.
 | `OPENAI_KEY` | pr-agent | review job skips |
 | `METRICS_TOKEN` | metrics embed | metrics job skips (needs a classic PAT) |
 | `LOST_PIXEL_API_KEY` | lost-pixel | only used when opted in |
+| `ANTHROPIC_API_KEY` | claude review | that reviewer skips |
+| `OPENAI_API_KEY` | codex review | that reviewer skips |
 
 | Variable | Used by |
 |---|---|
@@ -84,6 +89,23 @@ Everything below is optional; each job skips cleanly when its value is absent.
 |---|---|
 | `visual-regression` | opts a PR into lost-pixel |
 | `automerge` | opts a PR into automerge |
+
+## Why two AI reviewers and not one
+
+Running Claude and Codex on the same diff looks like redundancy. It isn't. In
+the session that produced this template, four independent review lanes from one
+model family — run blind, in parallel, with different checklists — all missed a
+defect that a single reviewer from a *different* family found immediately: an
+evaluation question set that leaked its own answers, invalidating the experiment
+built on top of it.
+
+Same-family reviewers share blind spots, so their agreement is correlation
+rather than evidence. The two jobs therefore get **deliberately different
+prompts** — one hunts failure scenarios in the code, the other hunts assumptions
+the author never checked. Where they agree you learn little; where they differ,
+one of them has seen something.
+
+Both skip cleanly without their key, so fork PRs are unaffected.
 
 ## Two honest caveats
 

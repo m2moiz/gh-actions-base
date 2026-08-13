@@ -1,0 +1,131 @@
+name: review
+
+# TWO REVIEWERS FROM DIFFERENT FAMILIES, AND THAT IS THE POINT.
+#
+# Running Claude and Codex on the same diff looks like redundancy. It is not.
+# The evidence, from the session that produced this template: four independent
+# review lanes from one model family, run blind and in parallel, all missed a
+# defect that a single reviewer from a different family found immediately -- an
+# evaluation question set that leaked its own answers, which invalidated the
+# experiment built on it. Same-family reviewers share blind spots; agreement
+# between them is correlation, not evidence.
+#
+# So the design is: two families, and pr-agent (in pr.yml) as the structured
+# describe/improve pass. Disagreement between the two is the signal worth
+# reading -- where they agree you learn little, where they differ one of them
+# has seen something.
+#
+# Both jobs skip cleanly when their key is absent, which is always the case on
+# a fork PR, so this never makes an outside contribution look broken.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+concurrency:
+  group: review-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  claude:
+    name: claude review
+    if: >-
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      # The action exchanges an OIDC token rather than holding a long-lived
+      # credential for the GitHub side of the conversation.
+      id-token: write
+    steps:
+      - name: is a key configured?
+        id: gate
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: echo "ready=${{ env.KEY != '' }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: review
+        if: steps.gate.outputs.ready == 'true'
+        uses: anthropics/claude-code-action@239e3a730883eeb5c53db12b0fc9573b3024b126 # v1.0.191
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Ask for the failure mode, not for a summary. A reviewer that
+          # restates the diff has told you nothing; one that names a concrete
+          # input producing a wrong output has.
+          prompt: |
+            Review this pull request for correctness defects.
+
+            For each finding give: the file and line, the mechanism, and a
+            concrete input or sequence that produces the wrong result. A
+            finding without a failure scenario is a guess -- say so or drop it.
+
+            Check especially:
+              - a test that could pass while the behaviour it names is broken
+              - a `skipif` that would fire in exactly the state it guards
+              - an assertion weaker than the claim in the name or docstring
+              - an error message whose remedy would not fix its own cause
+              - a comment or doc that asserts a mechanism the diff does not show
+
+            If the diff is clean, say so in one line. Do not pad.
+
+  codex:
+    name: codex review
+    if: >-
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       contains(github.event.comment.body, '@codex'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: is a key configured?
+        id: gate
+        env:
+          KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: echo "ready=${{ env.KEY != '' }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: review
+        if: steps.gate.outputs.ready == 'true'
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1.11
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          # Deliberately NOT the same prompt as above. Two reviewers given
+          # identical instructions converge; the value is in the difference, so
+          # this one is pointed at the assumptions rather than the code.
+          prompt: |
+            Review this pull request adversarially.
+
+            Your job is to find what the author assumed without checking. For
+            each finding: the assumption, why it may be false, and the cheapest
+            test that would settle it.
+
+            Pay attention to claims made in commit messages, comments and docs
+            that the diff does not actually demonstrate -- a stated cause that
+            was never reproduced is the most expensive kind of wrong.
+
+            If you find nothing, say NO FINDINGS and give your reasoning in two
+            sentences.

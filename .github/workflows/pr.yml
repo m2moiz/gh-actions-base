@@ -48,6 +48,24 @@ jobs:
           OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  deps:
+    name: dependency review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Blocks a PR that INTRODUCES a dependency with a known advisory, at the
+      # gate. Dependabot tells you afterwards; this tells you before, which is
+      # the difference between a decision and a cleanup.
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+
   visual:
     name: lost-pixel
     # OPT-IN, because most repositories have no UI. Add a `visual-regression`

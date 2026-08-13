@@ -1,0 +1,78 @@
+name: posture
+
+# The checks that audit the repository itself rather than the code in it:
+# is the branch protected, are the actions pinned, do the workflows have
+# dangerous permissions.
+#
+# THE SELF-REFERENTIAL ONE. Everything else here depends on ~20 third-party
+# actions, and without zizmor the only thing auditing those workflow files is
+# whoever last edited them. zizmor found 24 high-severity issues in the first
+# draft of this template -- written carefully, by hand, in one sitting.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "37 3 * * 2"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: posture-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workflows:
+    name: workflow audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Static analysis of the workflows: unpinned actions, credential
+      # persistence, template injection, dangerous triggers.
+      - uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+
+      # actionlint is the other half: expression syntax, shellcheck over every
+      # `run:` block, invalid `runs-on`, unknown contexts. Installed rather than
+      # run as an action -- one binary, no extra supply-chain surface.
+      - name: actionlint
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
+
+  scorecard:
+    name: scorecard
+    runs-on: ubuntu-latest
+    # Scheduled and main only: Scorecard reads repository settings, which a
+    # pull request cannot change, so running it per-PR measures nothing new.
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      security-events: write
+      # Required for the OIDC token Scorecard uses to publish results.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Scores Branch-Protection, Pinned-Dependencies, Token-Permissions,
+      # Dangerous-Workflow, CI-Tests and more. This is the job that tells you
+      # main is unprotected instead of you finding out by querying the API by
+      # hand two months later.
+      - uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: false
+
+      - uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        with:
+          sarif_file: scorecard.sarif
