@@ -83,10 +83,20 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Without this the action runs the review and then throws it away.
+          # A bare `prompt:` puts it in automation mode, where the output goes
+          # to the job log and the log is hidden for security -- observed on a
+          # deliberately buggy pull request: five turns, no error, no comment,
+          # and a green check that meant nothing. track_progress is what posts
+          # the findings back to the pull request.
+          track_progress: true
           # Ask for the failure mode, not for a summary. A reviewer that
           # restates the diff has told you nothing; one that names a concrete
           # input producing a wrong output has.
           prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+
             Review this pull request for correctness defects.
 
             For each finding give: the file and line, the mechanism, and a
