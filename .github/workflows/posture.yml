@@ -37,7 +37,7 @@ jobs:
 
       # Static analysis of the workflows: unpinned actions, credential
       # persistence, template injection, dangerous triggers.
-      - uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+      - uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3
 
       # actionlint is the other half: expression syntax, shellcheck over every
       # `run:` block, invalid `runs-on`, unknown contexts. Installed rather than
@@ -73,6 +73,6 @@ jobs:
           results_format: sarif
           publish_results: false
 
-      - uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+      - uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: scorecard.sarif
